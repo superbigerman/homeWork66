@@ -1,7 +1,5 @@
 package service
 
-import "strings"
-
 type Producer interface {
 	Produce() ([]string, error)
 }
@@ -28,35 +26,45 @@ func (s *Service) Run() error {
 		return err
 	}
 
-	result := s.MaskData(data)
+	result := s.maskData(data)
 	return s.pres.Present(result)
 }
 
-func (s *Service) MaskData(data []string) []string {
+// maskData - ТОЧНО ТАКАЯ ЖЕ как maskaAfterURL, маскирует после https://
+func (s *Service) maskData(data []string) []string {
 	var result []string
 
+	// Для каждой строки в данных
 	for _, line := range data {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+		// Превращаем строку в массив байт
+		text := []byte(line)
+		target := []byte("https://")
+
+		// Ищем "https://" в строке
+		for i := 0; i <= len(text)-len(target); i++ {
+			// Проверяем совпадение
+			match := true
+			for t := 0; t < len(target); t++ {
+				if text[i+t] != target[t] {
+					match = false
+					break
+				}
+			}
+
+			if match {
+				// Маскируем всё после "https://" до пробела
+				for j := i + len(target); j < len(text); j++ {
+					if text[j] == ' ' {
+						break
+					}
+					text[j] = '*'
+				}
+				i += len(target) - 1
+			}
 		}
 
-		words := strings.Fields(line)
-		maskedWords := make([]string, len(words))
-
-		for i, word := range words {
-			maskedWords[i] = s.maskWord(word)
-		}
-
-		result = append(result, strings.Join(maskedWords, " "))
+		result = append(result, string(text))
 	}
 
 	return result
-}
-
-func (s *Service) maskWord(word string) string {
-	if len(word) <= 1 {
-		return word
-	}
-	return string(word[0]) + strings.Repeat("*", len(word)-1)
 }
