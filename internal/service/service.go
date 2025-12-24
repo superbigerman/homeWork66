@@ -39,7 +39,7 @@ func (s *Service) Run() error {
 func (s *Service) maskaAfterURL(text string) string {
 
 	result := []byte(text) // ← ЗДЕСЬ определяем переменную result
-	target := "https://"
+	target := "http://"
 
 	for i := 0; i <= len(text)-len(target); i++ {
 		if string(result[i:i+len(target)]) == target {
