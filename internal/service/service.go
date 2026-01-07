@@ -1,5 +1,9 @@
 package service
 
+import (
+	"sync"
+)
+
 type Producer interface {
 	Produce() ([]string, error)
 }
@@ -14,10 +18,7 @@ type Service struct {
 }
 
 func NewService(prod Producer, pres Presenter) *Service {
-	return &Service{
-		prod: prod,
-		pres: pres,
-	}
+	return &Service{prod: prod, pres: pres}
 }
 
 func (s *Service) Run() error {
@@ -26,14 +27,51 @@ func (s *Service) Run() error {
 		return err
 	}
 
-	// Применяем вашу функцию к каждой строке
-	var results []string
-	for _, line := range data {
-		masked := s.MaskaAfterURL(line)
-		results = append(results, masked)
+	results := s.mask(data)
+	return s.pres.Present(results)
+}
+
+func (s *Service) mask(data []string) []string {
+	if len(data) == 0 {
+		return nil
 	}
 
-	return s.pres.Present(results)
+	// Каналы
+	tasks := make(chan string, len(data))
+	results := make([]string, len(data))
+	var wg sync.WaitGroup
+
+	// 10 горутин максимум
+	workers := 10
+	if len(data) < workers {
+		workers = len(data)
+	}
+
+	// Запускаем горутины
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for task := range tasks {
+				// Читаем индекс из канала и маскируем
+				for i, text := range data {
+					if text == task {
+						results[i] = s.MaskaAfterURL(text)
+						break
+					}
+				}
+			}
+		}()
+	}
+
+	// Отправляем задачи
+	for _, line := range data {
+		tasks <- line
+	}
+	close(tasks)
+
+	wg.Wait()
+	return results
 }
 
 func (s *Service) MaskaAfterURL(text string) string {
@@ -44,18 +82,13 @@ func (s *Service) MaskaAfterURL(text string) string {
 	i := 0
 	for i <= len(text)-targetLen {
 		if string(result[i:i+targetLen]) == target {
-			// Начинаем маскировать после "http://"
 			start := i + targetLen
-
-			// Маскируем до пробела или конца строки
 			for j := start; j < len(result); j++ {
 				if result[j] == ' ' {
 					break
 				}
 				result[j] = '*'
 			}
-
-			// Переходим к следующему символу после обработанного
 			i = start + 1
 		} else {
 			i++
