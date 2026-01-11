@@ -39,53 +39,43 @@ func (s *Service) maskConcurrently(data []string) []string {
 		return []string{}
 	}
 
-	// 1️⃣ ПЕРВЫЙ канал: для задач
 	tasks := make(chan string, len(data))
 
-	// 2️⃣ ВТОРОЙ канал: для результатов (все воркеры пишут сюда)
 	results := make(chan string, len(data))
 
 	var wg sync.WaitGroup
 
-	// Определяем количество воркеров (максимум 10)
 	workers := 10
 	if len(data) < workers {
 		workers = len(data)
 	}
 
-	// Запускаем воркеров
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 
-			// Каждый воркер читает задачи из ОБЩЕГО канала tasks
 			for task := range tasks {
-				// Обрабатываем задачу
+
 				masked := s.maskURL(task)
 
-				// ⚠️ ВСЕ воркеры пишут в ОДИН канал results!
-				// Может быть небольшая конкуренция, но для быстрых операций это нормально
 				results <- masked
 			}
 		}()
 	}
 
-	// Отправляем все задачи в канал tasks
 	go func() {
 		for _, line := range data {
 			tasks <- line
 		}
-		close(tasks) // Закрываем канал задач - сигнал воркерам что задач больше нет
+		close(tasks)
 	}()
 
-	// Закрываем канал результатов когда все воркеры завершились
 	go func() {
-		wg.Wait()      // Ждем завершения всех воркеров
-		close(results) // Закрываем канал результатов
+		wg.Wait()
+		close(results)
 	}()
 
-	// Собираем все результаты из канала results
 	var masked []string
 	for result := range results {
 		masked = append(masked, result)
