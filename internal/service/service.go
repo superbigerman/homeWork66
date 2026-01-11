@@ -30,70 +30,64 @@ func (s *Service) Run() error {
 		return err
 	}
 
-	maskedData := s.maskConcurrentlyWithFanIn(data)
+	maskedData := s.maskConcurrently(data)
 	return s.pres.Present(maskedData)
 }
 
-func (s *Service) maskConcurrentlyWithFanIn(data []string) []string {
+func (s *Service) maskConcurrently(data []string) []string {
 	if len(data) == 0 {
 		return []string{}
 	}
 
+	// 1️⃣ ПЕРВЫЙ канал: для задач
 	tasks := make(chan string, len(data))
 
+	// 2️⃣ ВТОРОЙ канал: для результатов (все воркеры пишут сюда)
+	results := make(chan string, len(data))
+
+	var wg sync.WaitGroup
+
+	// Определяем количество воркеров (максимум 10)
 	workers := 10
 	if len(data) < workers {
 		workers = len(data)
 	}
 
-	workerChannels := make([]chan string, workers)
-
-	var wg sync.WaitGroup
-
+	// Запускаем воркеров
 	for i := 0; i < workers; i++ {
-		workerChannels[i] = make(chan string, 10)
-
 		wg.Add(1)
-		go func(resultChan chan<- string) {
+		go func() {
 			defer wg.Done()
-			defer close(resultChan)
 
+			// Каждый воркер читает задачи из ОБЩЕГО канала tasks
 			for task := range tasks {
+				// Обрабатываем задачу
 				masked := s.maskURL(task)
-				resultChan <- masked
+
+				// ⚠️ ВСЕ воркеры пишут в ОДИН канал results!
+				// Может быть небольшая конкуренция, но для быстрых операций это нормально
+				results <- masked
 			}
-		}(workerChannels[i])
+		}()
 	}
 
+	// Отправляем все задачи в канал tasks
 	go func() {
 		for _, line := range data {
 			tasks <- line
 		}
-		close(tasks)
+		close(tasks) // Закрываем канал задач - сигнал воркерам что задач больше нет
 	}()
 
-	fanInChan := make(chan string, len(data))
-
-	var fanInWg sync.WaitGroup
-
-	for _, workerChan := range workerChannels {
-		fanInWg.Add(1)
-		go func(sourceChan <-chan string) {
-			defer fanInWg.Done()
-
-			for result := range sourceChan {
-				fanInChan <- result
-			}
-		}(workerChan)
-	}
-
+	// Закрываем канал результатов когда все воркеры завершились
 	go func() {
-		fanInWg.Wait()
-		close(fanInChan)
+		wg.Wait()      // Ждем завершения всех воркеров
+		close(results) // Закрываем канал результатов
 	}()
 
+	// Собираем все результаты из канала results
 	var masked []string
-	for result := range fanInChan {
+	for result := range results {
 		masked = append(masked, result)
 	}
 
